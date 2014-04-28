@@ -35,7 +35,7 @@ trait LoadingCache[K, V] {
  * @param <V> value type
  */
 class EagerLoadingCacheBuilder[K, V] {
-  val elements = scala.collection.mutable.Map[K, (() => V, Option[FiniteDuration])]()
+  val elements = scala.collection.concurrent.TrieMap[K, (() => V, Option[FiniteDuration])]()
 
   def load(k: K, fn: () => V): EagerLoadingCacheBuilder[K, V] = {
     elements += (k -> (fn, None))
