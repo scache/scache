@@ -1,6 +1,8 @@
 name := "scala-loading-cache"
 
-version := "0.0.1"
+organization := "arfaian"
+
+version := "0.0.1-SNAPSHOT"
 
 scalaVersion := "2.10.4"
 
@@ -10,7 +12,7 @@ net.virtualvoid.sbt.graph.Plugin.graphSettings
 
 credentials += Credentials(Path.userHome / ".ivy2" / ".credentials")
 
-publishTo := Some("Revmetrix Private Repository" at "http://nexus.revmetrix.com:8081/nexus/content/repositories/rev-private")
+publishTo := Some("Revmetrix Snapshot Repository" at "http://nexus.revmetrix.com:8081/nexus/content/repositories/snapshots")
 
 libraryDependencies ++= Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
