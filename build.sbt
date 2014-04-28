@@ -8,6 +8,10 @@ resolvers += "Typesafe Repository" at "http://repo.typesafe.com/typesafe/release
 
 net.virtualvoid.sbt.graph.Plugin.graphSettings
 
+credentials += Credentials(Path.userHome / ".ivy2" / ".credentials")
+
+publishTo := Some("Revmetrix Private Repository" at "http://nexus.revmetrix.com:8081/nexus/content/repositories/rev-private")
+
 libraryDependencies ++= Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback" % "logback-classic" % "1.1.2",
