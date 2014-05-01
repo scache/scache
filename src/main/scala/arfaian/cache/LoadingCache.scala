@@ -17,10 +17,11 @@ import monifu.concurrent.atomic.AtomicAny
 
 /**
  * LoadingCache trait that offers a simple get method to retreive values and a stopAll method to halt reload operations.
- * @author arfaian
+
+ * @author Arian Arfaian <arfaian>
  *
- * @param <K>
- * @param <V>
+ * @param <K> key type
+ * @param <V> value type
  */
 trait LoadingCache[K, V] {
   def get(key: K): Option[V]
@@ -28,14 +29,16 @@ trait LoadingCache[K, V] {
 }
 
 /**
- * Builder class used to build EagerLoadingCache.
- * @author arfaian
+ * Builder class used to build instances of LoadingCache. Values are not loaded until cache is built. Not thread-safe.
+ * 
+ * @author Arian Arfaian <arfaian>
  *
  * @param <K> key type
  * @param <V> value type
  */
 class EagerLoadingCacheBuilder[K, V] {
-  val elements = scala.collection.concurrent.TrieMap[K, (() => V, Option[FiniteDuration])]()
+  val elements = scala.collection.mutable.Map[K, (() => V, Option[FiniteDuration])]()
+  var callback: (K, V) => _ = _
 
   def load(k: K, fn: () => V): EagerLoadingCacheBuilder[K, V] = {
     elements += (k -> (fn, None))
@@ -46,9 +49,14 @@ class EagerLoadingCacheBuilder[K, V] {
     elements += (k -> (fn, Some(d)))
     this
   }
+  
+  def removalListener(callback: (K, V) => _): EagerLoadingCacheBuilder[K, V] = {
+    this.callback = callback
+    this
+  }
 
   def build(): LoadingCache[K, V] = {
-    new EagerLoadingCacheClass[K, V](elements.toMap)
+    new EagerLoadingCacheClass[K, V](elements.toMap, callback)
   }
 }
 
@@ -61,13 +69,11 @@ class EagerLoadingCacheBuilder[K, V] {
  *
  * @author Arian Arfaian <arfaian>
  *
- * @param <K> key
- * @param <V> value
+ * @param <K> key type
+ * @param <V> value type
  */
-private class EagerLoadingCacheClass[K, V](val elements: Map[K, (() => V, Option[FiniteDuration])])
+private class EagerLoadingCacheClass[K, V](private val elements: Map[K, (() => V, Option[FiniteDuration])], private val callback: (K, V) => _)
   extends LoadingCache[K, V] with LazyLogging {
-
-  checkForDuplicateKeys()
 
   private val map = prime()
   private val cancelables = initializeScheduler()
@@ -82,13 +88,6 @@ private class EagerLoadingCacheClass[K, V](val elements: Map[K, (() => V, Option
   def stopAll(): Unit = {
     logger.info("stopping cache value refresh")
     cancelables.foreach(c => c.cancel)
-  }
-
-  private def checkForDuplicateKeys(): Unit = {
-    val keys = elements.map { case (k, (fn, d)) => k }(breakOut): Seq[K]
-    if (keys.distinct.size != keys.size) {
-      throw new IllegalArgumentException("duplicate keys in constructor")
-    }
   }
 
   private def prime(): Map[K, AtomicAny[V]] = {
@@ -118,7 +117,9 @@ private class EagerLoadingCacheClass[K, V](val elements: Map[K, (() => V, Option
     s.scheduleRepeated(duration, duration, load(k, fn).map {
       case (k, v) =>
         val atomicAny = map(k)
+        val oldValue = atomicAny.get
         atomicAny.lazySet(v)
+        callback(k, oldValue)
     })
   }
 
