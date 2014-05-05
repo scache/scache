@@ -1,23 +1,22 @@
 package arfaian.cache
 
 import java.util.concurrent.Executors
-
 import scala.collection.breakOut
 import scala.concurrent.Await
-import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
-
 import com.typesafe.scalalogging.slf4j.LazyLogging
-
 import monifu.concurrent.Cancelable
 import monifu.concurrent.Scheduler
 import monifu.concurrent.atomic.AtomicAny
+import scala.util.Success
+import scala.util.Failure
 
 /**
  * LoadingCache trait that offers a simple get method to retreive values and a stopAll method to halt reload operations.
-
+ * 
  * @author Arian Arfaian <arfaian>
  *
  * @param <K> key type
@@ -30,15 +29,15 @@ trait LoadingCache[K, V] {
 
 /**
  * Builder class used to build instances of LoadingCache. Values are not loaded until cache is built. Not thread-safe.
- * 
+ *
  * @author Arian Arfaian <arfaian>
  *
  * @param <K> key type
  * @param <V> value type
  */
-class EagerLoadingCacheBuilder[K, V] {
+class EagerLoadingCacheBuilder[K, V](private val callback: (K, V) => _ = (k: K, v: V) => (),
+                                     private val executionContext: ExecutionContext = scala.concurrent.ExecutionContext.Implicits.global) {
   val elements = scala.collection.mutable.Map[K, (() => V, Option[FiniteDuration])]()
-  var callback: (K, V) => _ = _
 
   def load(k: K, fn: () => V): EagerLoadingCacheBuilder[K, V] = {
     elements += (k -> (fn, None))
@@ -49,16 +48,14 @@ class EagerLoadingCacheBuilder[K, V] {
     elements += (k -> (fn, Some(d)))
     this
   }
-  
-  def removalListener(callback: (K, V) => _): EagerLoadingCacheBuilder[K, V] = {
-    this.callback = callback
-    this
-  }
 
   def build(): LoadingCache[K, V] = {
-    new EagerLoadingCacheClass[K, V](elements.toMap, callback)
+    new EagerLoadingCacheClass[K, V](elements.toMap, callback)(executionContext)
   }
 }
+
+
+
 
 /**
  * Implementation of EagerLoadingCache[K, V].  Eagerly evaluates values upon initialization.
@@ -72,8 +69,9 @@ class EagerLoadingCacheBuilder[K, V] {
  * @param <K> key type
  * @param <V> value type
  */
-private class EagerLoadingCacheClass[K, V](private val elements: Map[K, (() => V, Option[FiniteDuration])], private val callback: (K, V) => _)
-  extends LoadingCache[K, V] with LazyLogging {
+private class EagerLoadingCacheClass[K, V](private val elements: Map[K, (() => V, Option[FiniteDuration])],
+                                           private val callback: (K, V) => _)(implicit private val ec: ExecutionContext)
+    extends LoadingCache[K, V] with LazyLogging {
 
   private val map = prime()
   private val cancelables = initializeScheduler()
@@ -124,10 +122,14 @@ private class EagerLoadingCacheClass[K, V](private val elements: Map[K, (() => V
   }
 
   private def load(k: K, fn: () => V): Future[(K, V)] = {
-    val f = Future { (k, fn()) }
-    f.onSuccess {
-      case _ => logger.info(s"successfully loaded key for $k")
+    val f = Future { (k, fn()) }(ec)
+    f.onComplete {
+      case Success(_) => logger.info(s"successfully loaded key for $k")
+      case Failure(t) =>
+        logger.info(s"error loading value for $k: ${t.getMessage}")
+        throw t
     }
     f
   }
 }
+
