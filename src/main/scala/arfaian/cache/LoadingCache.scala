@@ -129,9 +129,6 @@ private class EagerLoadingCacheClass[K, V](private val elements: Map[K, (() => V
         logger.info(s"error loading value for $k: ${t.getMessage}")
         throw t
     }
-    f.onFailure {
-      case _ => logger.info(s"error loading value for $k")
-    }
     f
   }
 }
