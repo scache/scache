@@ -1,8 +1,8 @@
 name := "scala-loading-cache"
 
-organization := "arfaian"
-
 version := "0.0.1-SNAPSHOT"
+
+organization := "arfaian"
 
 scalaVersion := "2.10.4"
 
@@ -18,5 +18,6 @@ libraryDependencies ++= Seq(
   "com.typesafe.scala-logging" %% "scala-logging-slf4j" % "2.1.2",
   "ch.qos.logback" % "logback-classic" % "1.1.2",
   "org.monifu" %% "monifu-core" % "0.7.1",
-  "org.scalatest" %% "scalatest" % "2.1.4" % "test"
+  "org.scalatest" %% "scalatest" % "2.1.4" % "test",
+  "org.scalamock" %% "scalamock-scalatest-support" % "3.1.RC1" % "test"
 )
