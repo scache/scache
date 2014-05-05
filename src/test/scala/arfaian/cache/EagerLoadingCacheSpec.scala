@@ -16,9 +16,9 @@ import monifu.concurrent.atomic.AtomicInt
 class EagerLoadingCacheSpec extends FlatSpec with MockFactory with Matchers {
 
   "An EagerLoadingCache" should "load values before allowing clients to call get" in {
-    val cache = new EagerLoadingCacheBuilder().load("a", () => { Thread.sleep(10); "aValue" })
-      .load("b", () => { Thread.sleep(10); "bValue" })
-      .load("c", () => { Thread.sleep(10); "cValue" })
+    val cache = new EagerLoadingCacheBuilder().load("a", () => { Thread.sleep(200); "aValue" })
+      .load("b", () => { Thread.sleep(200); "bValue" })
+      .load("c", () => { Thread.sleep(200); "cValue" })
       .build()
     assert(cache.get("a").get == "aValue")
     assert(cache.get("b").get == "bValue")
@@ -27,7 +27,7 @@ class EagerLoadingCacheSpec extends FlatSpec with MockFactory with Matchers {
 
   it should "reload values that expire" in {
     val atomicInteger = AtomicInt(0);
-    val cache = new EagerLoadingCacheBuilder()
+    val cache = new EagerLoadingCacheBuilder[String, Int]()
       .load("k", () => { Thread.sleep(1); atomicInteger.incrementAndGet(1) }, 500.millis).build()
     Thread.sleep(1000)
     cache.get("k") match {
@@ -50,7 +50,7 @@ class EagerLoadingCacheSpec extends FlatSpec with MockFactory with Matchers {
   }
 
   it should "handle multiple threads while reloading expired values" in {
-    val cache = new EagerLoadingCacheBuilder()
+    val cache = new EagerLoadingCacheBuilder[String, TestObject]()
       .load("test3", () => { new TestObject() }, 1.milli).build()
     implicit val c = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(20))
     val tasks: Seq[Future[TestObject]] = for (i <- 1 to 10000) yield Future {
@@ -68,8 +68,25 @@ class EagerLoadingCacheSpec extends FlatSpec with MockFactory with Matchers {
     val p = mockFunction[String, TestObject, String]
     val o = new TestObject()
     p.expects("test3", o).anyNumberOfTimes
-    val cache = new EagerLoadingCacheBuilder()
-      .load("test3", () => { o }, 1.milli).removalListener(p) build ()
+    val cache = new EagerLoadingCacheBuilder[String, TestObject](p)
+      .load("test3", () => { o }, 1.milli).build()
+  }
+
+  // need to figure out a better way to test separate execution context -AA
+  it should "use a different execution context when one is passed in" in {
+    val o = new TestObject()
+    val c = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(1))
+    val cache = new EagerLoadingCacheBuilder[String, TestObject](executionContext = c)
+      .load("test3", () => { Thread.sleep(200); o }, 1.milli).build()
+    assert(cache.get("test3") == Some(o))
+  }
+
+  // need to figure out a better way to test separate execution context -AA
+  it should "throw an exception when loading a value fails" in {
+    intercept[Exception] {
+      val cache = new EagerLoadingCacheBuilder[String, TestObject]
+        .load("test3", () => { throw new Exception() }, 1.milli).build()
+    }
   }
 
   private case class TestObject()
