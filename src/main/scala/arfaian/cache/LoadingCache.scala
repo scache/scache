@@ -41,7 +41,7 @@ class EagerLoadingCacheBuilder[K, V] {
     elements += (k -> (fn, None))
     this
   }
-  
+
   def load(k: K, fn: () => V, d: FiniteDuration): EagerLoadingCacheBuilder[K, V] = {
     elements += (k -> (fn, Some(d)))
     this
@@ -126,6 +126,9 @@ private class EagerLoadingCacheClass[K, V](val elements: Map[K, (() => V, Option
     val f = Future { (k, fn()) }
     f.onSuccess {
       case _ => logger.info(s"successfully loaded key for $k")
+    }
+    f.onFailure {
+      case _ => logger.info(s"error loading value for $k")
     }
     f
   }
