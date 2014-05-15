@@ -37,7 +37,7 @@ trait LoadingCache[K, V] {
  */
 class EagerLoadingCacheBuilder[K, V](private val callback: (K, V) => _ = (k: K, v: V) => (),
                                      private val executionContext: ExecutionContext = scala.concurrent.ExecutionContext.Implicits.global) {
-  val elements = scala.collection.mutable.Map[K, (() => V, Option[FiniteDuration])]()
+  val elements = Map.newBuilder[K, (() => V, Option[FiniteDuration])]
 
   def load(k: K, fn: () => V): EagerLoadingCacheBuilder[K, V] = {
     elements += (k -> (fn, None))
@@ -50,7 +50,7 @@ class EagerLoadingCacheBuilder[K, V](private val callback: (K, V) => _ = (k: K, 
   }
 
   def build(): LoadingCache[K, V] = {
-    new EagerLoadingCacheClass[K, V](elements.toMap, callback)(executionContext)
+    new EagerLoadingCacheClass[K, V](elements.result, callback)(executionContext)
   }
 }
 
