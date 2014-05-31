@@ -1,8 +1,8 @@
-scala-loading-cache
+scache
 =================
 
 ###Overview
-Contains an implementation of EagerLoadingCache, a cache mechanism written in Scala inspired by Google Guava's LoadingCache in which values are loaded upon initialization and reloaded on a defined time interval. This library is designed following the single-writer principle in that a single thread handles writes to the atomic reference container. The key behind this mechanism is the Atomic*.lazySet method which provides significantly cheaper volatile writes. Load operations happen concurrently in a non-blocking manner using the global ExecutionContext.
+scache is a caching library written in scala that provides an in-memory loading cache mechanism inspired by Google Guava's LoadingCache in which values are loaded upon initialization and reloaded on a defined time interval. This library is designed following the single-writer principle in that a single thread handles writes to the atomic reference container. The key behind this mechanism is the Atomic*.lazySet method which provides significantly cheaper volatile writes. Load operations happen concurrently in a non-blocking manner using the global ExecutionContext.
 
 ###Tell Me More
 The idea behind the single-writer principle is that since only one thread is responsible for setting volatile values,

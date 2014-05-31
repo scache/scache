@@ -13,30 +13,42 @@ import org.scalatest.Matchers
 
 import monifu.concurrent.atomic.AtomicInt
 
-class EagerLoadingCacheSpec extends FlatSpec with MockFactory with Matchers {
+class EagerCascadedLoadingCacheSpec extends FlatSpec with MockFactory with Matchers {
 
-  "An EagerLoadingCache" should "load values before allowing clients to call get" in {
-    val cache = new EagerLoadingCacheBuilder().load("a", () => { Thread.sleep(200); "aValue" })
-      .load("b", () => { Thread.sleep(200); "bValue" })
-      .load("c", () => { Thread.sleep(200); "cValue" })
+  "An EagerCascadedLoadingCache" should "load values before allowing clients to call get" in {
+    val cache = new EagerCascadedLoadingCacheBuilder[Int, String]()
+      .load(1, () => { Thread.sleep(200); "A" })
+      .load(4, () => { Thread.sleep(200); "D" })
+      .load(8, () => { Thread.sleep(200); "H" })
+      .load(2, ((m: Map[Int, String]) => { Thread.sleep(200); m(1) + "B" }), 1)
+      .load(3, ((m: Map[Int, String]) => { Thread.sleep(200); m(1) + m(4) + "C" }), 1, 4)
       .build()
-    assert(cache.get("a").get == "aValue")
-    assert(cache.get("b").get == "bValue")
-    assert(cache.get("c").get == "cValue")
+    assert(cache.get(1).get == "A")
+    assert(cache.get(4).get == "D")
+    assert(cache.get(8).get == "H")
+    assert(cache.get(2).get == "AB")
+    assert(cache.get(3).get == "ADC")
   }
 
   it should "reload values that expire" in {
     val atomicInteger = AtomicInt(0);
-    val cache = new EagerLoadingCacheBuilder[String, Int]()
-      .load("k", () => { Thread.sleep(1); atomicInteger.incrementAndGet(1) }, 500.millis).build()
-    Thread.sleep(1000)
-    cache.get("k") match {
-      case Some(i) => assert(i > 0)
-      case None => fail
-    }
+    val cache = new EagerCascadedLoadingCacheBuilder[Int, String]()
+      .load(1, () => { Thread.sleep(200); atomicInteger.incrementAndGet(1) + "A" }, 500.milli)
+      .load(4, () => { Thread.sleep(200); "D" })
+      .load(8, () => { Thread.sleep(200); "H" })
+      .load(2, ((m: Map[Int, String]) => { Thread.sleep(200); m(1) + "B" }), 1)
+      .load(3, ((m: Map[Int, String]) => { Thread.sleep(200); m(1) + m(4) + "C" }), 1, 4)
+      .build()
+    Thread.sleep(100)
     cache.stopAll
+    assert(cache.get(1).get == "1A")
+    assert(cache.get(4).get == "D")
+    assert(cache.get(8).get == "H")
+    assert(cache.get(2).get == "1AB")
+    assert(cache.get(3).get == "1ADC")
   }
 
+  /*
   it should "contain values that are loaded" in {
     val cache = new EagerLoadingCacheBuilder()
       .load("k", () => { "v" }).build()
@@ -88,7 +100,8 @@ class EagerLoadingCacheSpec extends FlatSpec with MockFactory with Matchers {
         .load("test3", () => { throw new Exception() }, 1.milli).build()
     }
   }
-  
+
   private case class TestObject()
 
+  */
 }
