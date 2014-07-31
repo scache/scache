@@ -8,7 +8,7 @@ import scala.collection.Set
 import scala.collection.breakOut
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext
-import scala.concurrent.ExecutionContext.Implicits.{global => globalExecutionContext}
+import scala.concurrent.ExecutionContext.Implicits.{ global => globalExecutionContext }
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
@@ -23,27 +23,26 @@ import monifu.concurrent.Cancelable
 import monifu.concurrent.Scheduler
 import monifu.concurrent.atomic.AtomicAny
 
-/**
- * LoadingCache trait that offers a simple get method to retreive values and a stopAll method to halt reload operations.
- *
- * @author Arian Arfaian <arfaian>
- *
- * @param <K> key type
- * @param <V> value type
- */
+/** LoadingCache trait that offers a simple get method to retreive values and a stopAll method to halt reload operations.
+  *
+  * @author Arian Arfaian <arfaian>
+  *
+  * @param <K> key type
+  * @param <V> value type
+  */
 trait LoadingCache[K, V] {
   def get(key: K): Option[V]
+  def reload(key: K): Unit
   def stopAll(): Unit
 }
 
-/**
- * Builder class used to build instances of EagerLoadingCacheClass. Values are not loaded until cache is built. Not thread-safe.
- *
- * @author Arian Arfaian <arfaian>
- *
- * @param <K> key type
- * @param <V> value type
- */
+/** Builder class used to build instances of EagerLoadingCacheClass. Values are not loaded until cache is built. Not thread-safe.
+  *
+  * @author Arian Arfaian <arfaian>
+  *
+  * @param <K> key type
+  * @param <V> value type
+  */
 class EagerLoadingCacheBuilder[K, V](private val callback: (K, V) => _ = (k: K, v: V) => (),
                                      private val executionContext: ExecutionContext = globalExecutionContext) {
   val elements = Map.newBuilder[K, (() => V, Option[FiniteDuration])]
@@ -66,18 +65,17 @@ class EagerLoadingCacheBuilder[K, V](private val callback: (K, V) => _ = (k: K, 
   }
 }
 
-/**
- * Implementation of EagerLoadingCache[K, V].  Eagerly evaluates values upon initialization.
- * Also schedules and executes load operations for keys for which a duration is defined.
- * Follows the single-writer multiple-reader principle in that values are only updated by
- * a single internally contained thread.  Load operations are delegated to the global
- * ExecutionContext in order to take advantage of parallelism for long-running tasks.
- *
- * @author Arian Arfaian <arfaian>
- *
- * @param <K> key type
- * @param <V> value type
- */
+/** Implementation of EagerLoadingCache[K, V].  Eagerly evaluates values upon initialization.
+  * Also schedules and executes load operations for keys for which a duration is defined.
+  * Follows the single-writer multiple-reader principle in that values are only updated by
+  * a single internally contained thread.  Load operations are delegated to the global
+  * ExecutionContext in order to take advantage of parallelism for long-running tasks.
+  *
+  * @author Arian Arfaian <arfaian>
+  *
+  * @param <K> key type
+  * @param <V> value type
+  */
 private class EagerLoadingCacheImpl[K, V](private val elements: Map[K, (() => V, Option[FiniteDuration])],
                                           private val callback: (K, V) => _)(implicit private val ec: ExecutionContext)
     extends LoadingCache[K, V] with LazyLogging {
@@ -86,10 +84,14 @@ private class EagerLoadingCacheImpl[K, V](private val elements: Map[K, (() => V,
   private val cancelables = initializeScheduler()
 
   override def get(key: K): Option[V] = {
-    map.get(key).map(v => v.get)
+    map.get(key).map(_.get)
   }
 
-  override def stopAll(): Unit = {
+  override def reload(key: K) {
+    elements.get(key).map { case (fn, duration) => load(key, fn) }
+  }
+
+  override def stopAll() {
     logger.info("stopping cache value refresh")
     cancelables.foreach(c => c.cancel)
   }
@@ -109,16 +111,14 @@ private class EagerLoadingCacheImpl[K, V](private val elements: Map[K, (() => V,
 
   private def initializeScheduler(): Seq[Cancelable] = {
     val s = Scheduler.fromExecutorService(Executors.newFixedThreadPool(1))
-    elements.filter({
-      case (k, (fn, d)) => d.isDefined
-    }).map {
-      case (k, (fn, d)) => scheduleRefresh(s, k, fn, d)
-    }(breakOut): Seq[Cancelable]
+    elements.collect({
+      case (k, (fn, d)) if d.isDefined => scheduleRefresh(s, k, fn, d)
+    })(breakOut): Seq[Cancelable]
   }
 
   private def scheduleRefresh(s: Scheduler, k: K, fn: () => V, d: Option[FiniteDuration]): Cancelable = {
     val duration = d.get
-    s.scheduleRepeated(duration, duration, load(k, fn).map(f => onLoadComplete(f._1, f._2)))
+    s.scheduleRepeated(duration, duration, () => { load(k, fn).map(f => onLoadComplete(f._1, f._2)) })
   }
 
   private def onLoadComplete(k: K, v: V) = {
@@ -129,25 +129,24 @@ private class EagerLoadingCacheImpl[K, V](private val elements: Map[K, (() => V,
   }
 
   private def load(k: K, fn: () => V): Future[(K, V)] = {
-    val f = Future { (k, fn()) }(ec)
+    val f = Future((k, fn()))(ec)
     f.onComplete {
       case Success(_) => logger.info(s"successfully loaded key for $k")
       case Failure(t) =>
-        logger.info(s"error loading value for $k: ${t.getMessage}")
+        logger.error(s"error loading value for $k: ${t.getMessage}")
         throw t
     }
     f
   }
 }
 
-/**
- * Builder class used to build instances of LoadingCache. Values are not loaded until cache is built. Not thread-safe.
- *
- * @author Arian Arfaian <arfaian>
- *
- * @param <K> key type
- * @param <V> value type
- */
+/** Builder class used to build instances of LoadingCache. Values are not loaded until cache is built. Not thread-safe.
+  *
+  * @author Arian Arfaian <arfaian>
+  *
+  * @param <K> key type
+  * @param <V> value type
+  */
 class EagerCascadedLoadingCacheBuilder[K: TypeTag, V](private val callback: (K, V) => _ = (k: K, v: V) => (),
                                                       private val executionContext: ExecutionContext = globalExecutionContext) {
   private var nodes = Set.empty[K]
@@ -158,18 +157,18 @@ class EagerCascadedLoadingCacheBuilder[K: TypeTag, V](private val callback: (K, 
   def load(k: K, fn: () => V): EagerCascadedLoadingCacheBuilder[K, V] = {
     load(k, fn, None)
   }
-  
+
   def load(k: K, fn: () => V, d: FiniteDuration): EagerCascadedLoadingCacheBuilder[K, V] = {
     load(k, fn, Some(d))
   }
-  
+
   def load(k: K, fn: Map[K, V] => V, dependencies: K*): EagerCascadedLoadingCacheBuilder[K, V] = {
     nodes += k
     edges ++= dependencies.map(d => (d, k))
     dependents += k -> fn
     this
   }
-  
+
   private def load(k: K, fn: () => V, d: Option[FiniteDuration]): EagerCascadedLoadingCacheBuilder[K, V] = {
     nodes += k
     independents += k -> (fn, d)
@@ -208,41 +207,43 @@ case object EagerCascadedLoadingCachePrimer {
   }
 }
 
-/**
- * Implementation of EagerLoadingCache[K, V].  Eagerly evaluates values upon initialization.
- * Also schedules and executes load operations for keys for which a duration is defined.
- * Follows the single-writer multiple-reader principle in that values are only updated by
- * a single internally contained thread.  Load operations are delegated to the global
- * ExecutionContext in order to take advantage of parallelism for long-running tasks.
- *
- * @author Arian Arfaian <arfaian>
- *
- * @param <K> key type
- * @param <V> value type
- */
+/** Implementation of EagerLoadingCache[K, V].  Eagerly evaluates values upon initialization.
+  * Also schedules and executes load operations for keys for which a duration is defined.
+  * Follows the single-writer multiple-reader principle in that values are only updated by
+  * a single internally contained thread.  Load operations are delegated to the global
+  * ExecutionContext in order to take advantage of parallelism for long-running tasks.
+  *
+  * @author Arian Arfaian <arfaian>
+  *
+  * @param <K> key type
+  * @param <V> value type
+  */
 private class EagerCascadedLoadingCacheImpl[K, V](private val map: Map[K, AtomicAny[V]],
                                                   private val independents: Map[K, (() => V, Option[FiniteDuration])],
                                                   private val dependents: Map[K, Map[K, V] => V],
                                                   private val scheduler: DAGScheduler[K],
                                                   private val callback: (K, V) => _)(implicit private val ec: ExecutionContext) extends LoadingCache[K, V] with LazyLogging {
   private val cancelables = initializeScheduler()
-  
+
   override def get(key: K): Option[V] = {
     map.get(key).map(v => v.get)
   }
 
-  override def stopAll(): Unit = {
+  override def reload(key: K) {
+    independents.get(key).map { case (fn, duration) => load(key, fn) } orElse
+      dependents.get(key).map { fn => load(key, fn, map.mapValues(_.get)) }
+  }
+
+  override def stopAll() {
     logger.info("stopping cache value refresh")
     cancelables.foreach(c => c.cancel)
   }
 
   private def initializeScheduler(): Seq[Cancelable] = {
     val s = Scheduler.fromExecutorService(Executors.newFixedThreadPool(1))
-    independents.filter({
-      case (k, (fn, d)) => d.isDefined
-    }).map {
-      case (k, (fn, d)) => scheduleRefresh(s, k, fn, d)
-    }(breakOut): Seq[Cancelable]
+    independents.collect({
+      case (k, (fn, d)) if d.isDefined => scheduleRefresh(s, k, fn, d)
+    })(breakOut): Seq[Cancelable]
   }
 
   private def scheduleRefresh(s: Scheduler, k: K, fn: () => V, d: Option[FiniteDuration]): Cancelable = {
@@ -257,7 +258,7 @@ private class EagerCascadedLoadingCacheImpl[K, V](private val map: Map[K, Atomic
         loadDependents(k)
         logger.info(s"successfully loaded key for $k")
       case Failure(t) =>
-        logger.info(s"error loading value for $k: ${t.getMessage}")
+        logger.error(s"couldn't load value for $k: ${t.getMessage}")
         throw t
     }
     f
@@ -270,7 +271,7 @@ private class EagerCascadedLoadingCacheImpl[K, V](private val map: Map[K, Atomic
         loadDependents(k)
         logger.info(s"successfully loaded key for $k")
       case Failure(t) =>
-        logger.info(s"error loading value for $k: ${t.getMessage}")
+        logger.error(s"couldn't load value for $k: ${t.getMessage}")
         throw t
     }
     f
@@ -283,7 +284,7 @@ private class EagerCascadedLoadingCacheImpl[K, V](private val map: Map[K, Atomic
         in => in -> (scheduler.getOutNeighbors(in).map((parentKey) => parentKey -> map(parentKey))(breakOut): Map[K, AtomicAny[V]])
       }(breakOut): Map[K, Map[K, AtomicAny[V]]]
       t.foreach {
-        case (k, v) => load(k, dependents(k), v.map { case (k, v) => k -> v.get })
+        case (k, v) => load(k, dependents(k), v.mapValues(_.get))
       }
     }
   }
