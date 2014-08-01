@@ -32,7 +32,7 @@ import monifu.concurrent.atomic.AtomicAny
   */
 trait LoadingCache[K, V] {
   def get(key: K): Option[V]
-  def reload(key: K): Unit
+  def reload(key: K): Future[(K, V)]
   def stopAll(): Unit
 }
 
@@ -87,8 +87,8 @@ private class EagerLoadingCacheImpl[K, V](private val elements: Map[K, (() => V,
     map.get(key).map(_.get)
   }
 
-  override def reload(key: K) {
-    elements.get(key).map { case (fn, duration) => load(key, fn) }
+  override def reload(key: K) = {
+    load(key, elements(key)._1)
   }
 
   override def stopAll() {
@@ -229,9 +229,9 @@ private class EagerCascadedLoadingCacheImpl[K, V](private val map: Map[K, Atomic
     map.get(key).map(v => v.get)
   }
 
-  override def reload(key: K) {
-    independents.get(key).map { case (fn, duration) => load(key, fn) } orElse
-      dependents.get(key).map { fn => load(key, fn, map.mapValues(_.get)) }
+  override def reload(key: K) = {
+    independents.get(key).map { case (fn, duration) => load(key, fn) } getOrElse
+      load(key, dependents(key), map.mapValues(_.get))
   }
 
   override def stopAll() {
