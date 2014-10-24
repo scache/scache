@@ -248,13 +248,14 @@ private class EagerCascadedLoadingCacheImpl[K, V](private val map: Map[K, Atomic
 
   private def scheduleRefresh(s: Scheduler, k: K, fn: () => V, d: Option[FiniteDuration]): Cancelable = {
     val duration = d.get
-    s.scheduleRepeated(duration, duration, load(k, fn).map(f => onLoadComplete(f._1, f._2)))
+    s.scheduleRepeated(duration, duration, { load(k, fn) })
   }
 
   private def load(k: K, fn: () => V): Future[(K, V)] = {
     val f = Future { (k, fn()) }(ec)
     f.onComplete {
-      case Success(_) =>
+      case Success(t: (K, V)) =>
+        onLoadComplete(t._1, t._2)
         loadDependents(k)
         logger.info(s"successfully loaded key for $k")
       case Failure(t) =>
@@ -267,7 +268,8 @@ private class EagerCascadedLoadingCacheImpl[K, V](private val map: Map[K, Atomic
   private def load(k: K, fn: Map[K, V] => V, args: Map[K, V]): Future[(K, V)] = {
     val f = Future { (k, fn(args)) }(ec)
     f.onComplete {
-      case Success(_) =>
+      case Success(t: (K, V)) =>
+        onLoadComplete(t._1, t._2)
         loadDependents(k)
         logger.info(s"successfully loaded key for $k")
       case Failure(t) =>
